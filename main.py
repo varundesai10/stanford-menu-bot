@@ -3,7 +3,6 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 import time
 from datetime import datetime
 from bs4 import BeautifulSoup
@@ -53,7 +52,7 @@ def send_telegram_message(bot_token, chat_id, message):
         response.raise_for_status()
         logger.info(f"Message sent successfully to chat_id: {chat_id}")
         return True
-    except requests.exceptions.RequestException as e:
+    except Exception as e:
         logger.error(f"Error sending Telegram message: {e}")
         return False
 
@@ -122,6 +121,9 @@ def get_menu(dining_hall, date, meal):
     chrome_options = Options()
     # Uncomment the next line to run in headless mode
     chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-extensions");
+    chrome_options.add_argument("--disable-dev-shm-usage");
+    chrome_options.add_argument("--no-sandbox");
 
     # Initialize the WebDriver for Chrome
     #service = Service()  # You can specify the path to chromedriver here if needed
@@ -220,10 +222,9 @@ def get_formatted_date(days_offset=0):
     date = datetime.now(pytz.timezone('US/Pacific')) + timedelta(days=days_offset)
     return date.strftime('%m/%-d/%Y - %A')
 
-async def send_menu_message(update, context, date):
+async def send_menu_message(update, context, date, meal):
     """Send menu messages for all dining halls on a specific date."""
     logger.info(f"Sending menu message for date: {date}")
-    meal = 'Lunch'  # You might want to make this dynamic based on the current time
     for dining_hall in dining_halls:
         menu = get_menu(dining_hall, date, meal)
         message = f"Menu for *{dining_hall}* on {date} for {meal}:\n"
@@ -234,29 +235,49 @@ async def send_menu_message(update, context, date):
 async def start(update, context):
     logger.info(f"Start command received from user: {update.effective_user.id}")
     await update.message.reply_text("Welcome to the Stanford Dining Hall Menu Bot! Here are the available commands:\n\n"
-                              "/menu - Get today's menu\n"
-                              "/tomorrow - Get tomorrow's menu\n"
+                              "/lunch - Get today's lunch menu\n"
+                              "/dinner - Get today's dinner menu\n"
+                              "/tomorrow_lunch - Get tomorrow's lunch menu\n"
+                              "/tomorrow_dinner - Get tomorrow's dinner menu\n"
+                              "/dininghalls - List available dining halls\n"
+                              "/subscribe - Subscribe to daily menu updates\n"
+                              "/unsubscribe - Unsubscribe from daily menu updates\n"
                               "/help - Show this help message")
     return True
 
-async def menu(update, context):
-    logger.info(f"Menu command received from user: {update.effective_user.id}")
+
+async def lunch(update, context):
+    logger.info(f"Lunch command received from user: {update.effective_user.id}")
     date = get_formatted_date()
-    await send_menu_message(update, context, date)
+    await send_menu_message(update, context, date, meal='Lunch')
     return True
 
-async def tomorrow(update, context):
-    logger.info(f"Tomorrow command received from user: {update.effective_user.id}")
+async def dinner(update, context):
+    logger.info(f"Dinner command received from user: {update.effective_user.id}")
+    date = get_formatted_date()
+    await send_menu_message(update, context, date, meal='Dinner')
+    return True
+
+async def tomorrow_lunch(update, context):
+    logger.info(f"Tomorrow lunch command received from user: {update.effective_user.id}")
     date = get_formatted_date(days_offset=1)
-    await send_menu_message(update, context, date)
+    await send_menu_message(update, context, date, meal='Lunch')
+    return True
+
+async def tomorrow_dinner(update, context):
+    logger.info(f"Tomorrow dinner command received from user: {update.effective_user.id}")
+    date = get_formatted_date(days_offset=1)
+    await send_menu_message(update, context, date, meal='Dinner')
     return True
 
 async def help(update, context):
     logger.info(f"Help command received from user: {update.effective_user.id}")
     await update.message.reply_text(
         "Welcome to the Stanford Dining Hall Menu Bot! Here are the available commands:\n\n"
-        "/menu - Get today's menu for all dining halls\n"
-        "/tomorrow - Get tomorrow's menu for all dining halls\n"
+        "/lunch - Get today's lunch menu for all dining halls\n"
+        "/dinner - Get today's dinner menu for all dining halls\n"
+        "/tomorrow_lunch - Get tomorrow's lunch menu for all dining halls\n"
+        "/tomorrow_dinner - Get tomorrow's dinner menu for all dining halls\n"
         "/dininghalls - List available dining halls\n"
         "/subscribe - Subscribe to daily menu updates\n"
         "/unsubscribe - Unsubscribe from daily menu updates\n"
@@ -311,12 +332,13 @@ async def send_daily_menu(context):
     meal = 'Lunch'
     subscriptions = load_subscriptions()
     
-    for user_id in subscriptions:
-        for dining_hall in dining_halls:
-            menu = get_menu(dining_hall, date, meal)
-            message = f"Menu for *{dining_hall}* on {date} for {meal}:\n"
-            message += "\n".join(menu.keys())
-            await context.bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
+    for meal in ['Lunch', 'Dinner']:
+        for user_id in subscriptions:
+            for dining_hall in dining_halls:
+                menu = get_menu(dining_hall, date, meal)
+                message = f"Menu for *{dining_hall}* on {date} for {meal}:\n"
+                message += "\n".join(menu.keys())
+                await context.bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
     
     logger.info(f"Daily menu sent at {datetime.now(pytz.timezone('US/Pacific')).strftime('%Y-%m-%d %H:%M:%S')} PT")
     return True
@@ -334,12 +356,14 @@ async def schedule_daily_menu(context):
         time_to_sleep = (next_run - now).total_seconds()
         logger.info(f"Sleeping until {next_run.strftime('%Y-%m-%d %H:%M:%S')} PT")
         await asyncio.sleep(time_to_sleep)
-        
         await send_daily_menu(context)
 
 def get_available_dining_halls():
     chrome_options = Options()
     chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-extensions");
+    chrome_options.add_argument("--disable-dev-shm-usage");
+    chrome_options.add_argument("--no-sandbox");
     driver = webdriver.Chrome(options=chrome_options)
     
     try:
@@ -388,11 +412,13 @@ async def dininghalls(update, context):
 
 if __name__ == "__main__":
     # Start the Telegram bot
-    application = Application.builder().token(bot_token).build()
+    application = Application.builder().token(bot_token).concurrent_updates(True).build()
 
     application.add_handler(CommandHandler('start', start))
-    application.add_handler(CommandHandler('menu', menu))
-    application.add_handler(CommandHandler('tomorrow', tomorrow))
+    application.add_handler(CommandHandler('lunch', lunch))
+    application.add_handler(CommandHandler('dinner', dinner))
+    application.add_handler(CommandHandler('tomorrow_lunch', tomorrow_lunch))
+    application.add_handler(CommandHandler('tomorrow_dinner', tomorrow_dinner))
     application.add_handler(CommandHandler('help', help))
     application.add_handler(CommandHandler('dininghalls', dininghalls))
     application.add_handler(CommandHandler('subscribe', subscribe))
