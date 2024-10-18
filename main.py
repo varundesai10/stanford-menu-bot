@@ -12,7 +12,7 @@ import pytz
 import threading
 import telegram
 from telegram.ext import CommandHandler, Application
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from telegram.ext import MessageHandler, filters
 import json
 import asyncio
@@ -232,17 +232,31 @@ async def send_menu_message(update, context, date, meal):
         await update.message.reply_text(message, parse_mode='Markdown')
     return True
 
+def get_main_menu_keyboard():
+    """Create the main menu keyboard."""
+    keyboard = [
+        [KeyboardButton("🍽️ Today's Lunch"), KeyboardButton("🍽️ Today's Dinner")],
+        [KeyboardButton("🍽️ Tomorrow's Lunch"), KeyboardButton("🍽️ Tomorrow's Dinner")],
+        [KeyboardButton("🏛️ Dining Halls"), KeyboardButton("📝 Subscribe")],
+        [KeyboardButton("❌ Unsubscribe"), KeyboardButton("ℹ️ Help")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
 async def start(update, context):
     logger.info(f"Start command received from user: {update.effective_user.id}")
-    await update.message.reply_text("Welcome to the Stanford Dining Hall Menu Bot! Here are the available commands:\n\n"
-                              "/lunch - Get today's lunch menu\n"
-                              "/dinner - Get today's dinner menu\n"
-                              "/tomorrow_lunch - Get tomorrow's lunch menu\n"
-                              "/tomorrow_dinner - Get tomorrow's dinner menu\n"
-                              "/dininghalls - List available dining halls\n"
-                              "/subscribe - Subscribe to daily menu updates\n"
-                              "/unsubscribe - Unsubscribe from daily menu updates\n"
-                              "/help - Show this help message")
+    welcome_message = (
+        "Welcome to the Stanford Dining Hall Menu Bot! "
+        "Choose an option from the menu below or type a command:\n\n"
+        "/lunch - Get today's lunch menu\n"
+        "/dinner - Get today's dinner menu\n"
+        "/tomorrow_lunch - Get tomorrow's lunch menu\n"
+        "/tomorrow_dinner - Get tomorrow's dinner menu\n"
+        "/dininghalls - List available dining halls\n"
+        "/subscribe - Subscribe to daily menu updates\n"
+        "/unsubscribe - Unsubscribe from daily menu updates\n"
+        "/help - Show this help message"
+    )
+    await update.message.reply_text(welcome_message, reply_markup=get_main_menu_keyboard())
     return True
 
 
@@ -250,24 +264,28 @@ async def lunch(update, context):
     logger.info(f"Lunch command received from user: {update.effective_user.id}")
     date = get_formatted_date()
     await send_menu_message(update, context, date, meal='Lunch')
+    await update.message.reply_text("What would you like to do next?", reply_markup=get_main_menu_keyboard())
     return True
 
 async def dinner(update, context):
     logger.info(f"Dinner command received from user: {update.effective_user.id}")
     date = get_formatted_date()
     await send_menu_message(update, context, date, meal='Dinner')
+    await update.message.reply_text("What would you like to do next?", reply_markup=get_main_menu_keyboard())
     return True
 
 async def tomorrow_lunch(update, context):
     logger.info(f"Tomorrow lunch command received from user: {update.effective_user.id}")
     date = get_formatted_date(days_offset=1)
     await send_menu_message(update, context, date, meal='Lunch')
+    await update.message.reply_text("What would you like to do next?", reply_markup=get_main_menu_keyboard())
     return True
 
 async def tomorrow_dinner(update, context):
     logger.info(f"Tomorrow dinner command received from user: {update.effective_user.id}")
     date = get_formatted_date(days_offset=1)
     await send_menu_message(update, context, date, meal='Dinner')
+    await update.message.reply_text("What would you like to do next?", reply_markup=get_main_menu_keyboard())
     return True
 
 async def help(update, context):
@@ -283,6 +301,7 @@ async def help(update, context):
         "/unsubscribe - Unsubscribe from daily menu updates\n"
         "/help - Show this help message"
     )
+    await update.message.reply_text("What would you like to do next?", reply_markup=get_main_menu_keyboard())
     return True
 
 def load_subscriptions():
@@ -379,8 +398,10 @@ def get_available_dining_halls():
         driver.quit()
 
 async def handle_message(update, context):
+    text = update.message.text
+
     if context.user_data.get('awaiting_dininghall'):
-        selected_hall = update.message.text
+        selected_hall = text
         available_halls = get_available_dining_halls()
         
         if selected_hall in available_halls:
@@ -394,7 +415,28 @@ async def handle_message(update, context):
         else:
             await update.message.reply_text("Invalid selection. Please choose a dining hall from the list.")
     else:
-        await update.message.reply_text("I'm sorry, I don't understand that command. Type /help for a list of available commands.")
+        if text == "🍽️ Today's Lunch":
+            await lunch(update, context)
+        elif text == "🍽️ Today's Dinner":
+            await dinner(update, context)
+        elif text == "🍽️ Tomorrow's Lunch":
+            await tomorrow_lunch(update, context)
+        elif text == "🍽️ Tomorrow's Dinner":
+            await tomorrow_dinner(update, context)
+        elif text == "🏛️ Dining Halls":
+            await dininghalls(update, context)
+        elif text == "📝 Subscribe":
+            await subscribe(update, context)
+        elif text == "❌ Unsubscribe":
+            await unsubscribe(update, context)
+        elif text == "ℹ️ Help":
+            await help(update, context)
+        else:
+            await update.message.reply_text(
+                "I'm sorry, I don't understand that command. "
+                "Please use the menu or type /help for a list of available commands.",
+                reply_markup=get_main_menu_keyboard()
+            )
 
 async def dininghalls(update, context):
     logger.info(f"Dininghalls command received from user: {update.effective_user.id}")
@@ -403,11 +445,15 @@ async def dininghalls(update, context):
     if available_halls:
         message = "Available dining halls:\n\n" + "\n".join(f"• {hall}" for hall in available_halls)
         keyboard = [[hall] for hall in available_halls]
+        keyboard.append(["Back to Main Menu"])
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
         await update.message.reply_text(message, reply_markup=reply_markup)
         context.user_data['awaiting_dininghall'] = True
     else:
-        await update.message.reply_text("Sorry, I couldn't retrieve the list of dining halls at the moment. Please try again later.")
+        await update.message.reply_text(
+            "Sorry, I couldn't retrieve the list of dining halls at the moment. Please try again later.",
+            reply_markup=get_main_menu_keyboard()
+        )
     return True
 
 if __name__ == "__main__":
